@@ -67,18 +67,17 @@ with st.sidebar:
 def draw_stage(current_pos=None, path_history=None):
     fig = go.Figure()
 
-    # [1] 벡터 필드 (Flow Arrows) - Scatter 선으로 구현하여 버그 해결
+    # [1] 벡터 필드 (Flow Arrows) 
+    # 주의: Scatter의 mode='lines'는 unselected에 'line' 속성을 지원하지 않으므로 제거함
     if st.session_state.vortices:
         arrows_x, arrows_y = [], []
         grid_pts = np.linspace(-LIMIT, LIMIT, 16)
-        scale = 0.2  # 화살표 길이 조절
-        
+        scale = 0.2
         for gx in grid_pts:
             for gy in grid_pts:
                 u, v = get_velocity_at(gx, gy, st.session_state.vortices)
                 speed = np.sqrt(u**2 + v**2)
                 if speed > 0.05:
-                    # 선의 시작점과 끝점 사이에 None을 넣어 개별 선으로 분리
                     arrows_x.extend([gx, gx + (u/speed)*scale, None])
                     arrows_y.extend([gy, gy + (v/speed)*scale, None])
         
@@ -86,11 +85,10 @@ def draw_stage(current_pos=None, path_history=None):
             x=arrows_x, y=arrows_y,
             mode='lines',
             line=dict(color='rgba(200, 200, 255, 0.4)', width=1),
-            hoverinfo='none', showlegend=False,
-            unselected=dict(line=dict(opacity=0.4))
+            hoverinfo='none', showlegend=False
         ))
 
-    # [배경 센서]
+    # [배경 센서] - 마커이므로 unselected 가능
     sensor_pts = np.linspace(-LIMIT, LIMIT, 21)
     sx, sy = np.meshgrid(sensor_pts, sensor_pts)
     fig.add_trace(go.Scatter(
@@ -100,7 +98,7 @@ def draw_stage(current_pos=None, path_history=None):
         unselected=dict(marker=dict(opacity=0))
     ))
 
-    # [2] 출발/도착 지점
+    # [2] 출발/도착 지점 - 마커이므로 unselected 가능
     fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers',
                              marker=dict(color='#2ECC71', size=15), name="Start",
                              unselected=dict(marker=dict(opacity=1))))
@@ -126,8 +124,7 @@ def draw_stage(current_pos=None, path_history=None):
     if path_history is not None:
         ph = np.array(path_history)
         fig.add_trace(go.Scatter(x=ph[:,0], y=ph[:,1], mode='lines',
-                                 line=dict(color='#F1C40F', width=3, dash='dot'),
-                                 unselected=dict(line=dict(opacity=1))))
+                                 line=dict(color='#F1C40F', width=3, dash='dot')))
 
     if current_pos is not None:
         fig.add_trace(go.Scatter(x=[current_pos[0]], y=[current_pos[1]], mode='markers',
