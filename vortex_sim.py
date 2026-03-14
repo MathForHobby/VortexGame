@@ -3,11 +3,10 @@ import numpy as np
 import plotly.graph_objects as go
 import time
 
-# --- 1. 초기화 및 상반기 설정 ---
+# --- 1. 초기화 및 설정 ---
 st.set_page_config(page_title="THE VORTEX: Stages", layout="wide")
 st.title("🌀 THE VORTEX: 경로 설계")
 
-# 세션 상태 초기화
 if 'vortices' not in st.session_state:
     st.session_state.vortices = []
 if 'temp_pos' not in st.session_state:
@@ -17,13 +16,11 @@ if 'playing' not in st.session_state:
 if 'current_stage' not in st.session_state:
     st.session_state.current_stage = 1
 
-# 게임 상수
 P_START = np.array([-4.0, 0.0])
 Q_TARGET = np.array([4.0, 0.0])
 TARGET_RADIUS = 0.3
 LIMIT = 5.0
 
-# 스테이지 2 장애물 영역 (Center Rectangle)
 OBSTACLE_RECT = {'x': [-1.0, 1.0], 'y': [-1.5, 1.5]}
 
 # --- 2. 물리 및 판정 함수 ---
@@ -37,28 +34,21 @@ def get_velocity_at(x, y, vortices):
     return u, v
 
 def check_collision(pos):
-    """장애물 및 벽 충돌 판정"""
-    # 스테이지 2 전용 중앙 장애물 체크
     if st.session_state.current_stage == 2:
         if OBSTACLE_RECT['x'][0] <= pos[0] <= OBSTACLE_RECT['x'][1] and \
            OBSTACLE_RECT['y'][0] <= pos[1] <= OBSTACLE_RECT['y'][1]:
             return "OBSTACLE"
-    
-    # 외곽 벽 체크
     if np.abs(pos).max() > LIMIT + 0.2:
         return "WALL"
-    
     return None
 
-# --- 3. 사이드바 UI 컨트롤 ---
+# --- 3. 사이드바 UI ---
 with st.sidebar:
     st.header("🎮 레벨 디자인")
-    
-    # 스테이지 선택
     stage = st.radio("스테이지 선택", [1, 2], index=st.session_state.current_stage-1)
     if stage != st.session_state.current_stage:
         st.session_state.current_stage = stage
-        st.session_state.vortices = [] # 스테이지 변경 시 초기화
+        st.session_state.vortices = []
         st.session_state.playing = False
         st.rerun()
     
@@ -92,11 +82,9 @@ with st.sidebar:
 # --- 4. 렌더링 함수 ---
 def draw_stage(current_pos=None, path_history=None, crash=False):
     fig = go.Figure()
-
-    # [배경 색상 설정] - 연한 파란색
-    bg_color = "#E0F2F7" # Light Blue
+    bg_color = "#E0F2F7"
     
-    # [1] 벡터 필드 (흐름 선)
+    # [1] 벡터 필드
     if st.session_state.vortices:
         arrows_x, arrows_y = [], []
         grid_pts = np.linspace(-LIMIT, LIMIT, 16)
@@ -112,20 +100,19 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
                                  line=dict(color='rgba(0, 100, 200, 0.15)', width=1),
                                  hoverinfo='none', showlegend=False))
 
-    # [스테이지 2 장애물 시각화]
     if st.session_state.current_stage == 2:
         fig.add_shape(type="rect",
                       x0=OBSTACLE_RECT['x'][0], y0=OBSTACLE_RECT['y'][0],
                       x1=OBSTACLE_RECT['x'][1], y1=OBSTACLE_RECT['y'][1],
                       line=dict(color="RoyalBlue"), fillcolor="LightSlateGray", opacity=0.8)
 
-    # [클릭 센서]
-    sensor_pts = np.linspace(-LIMIT, LIMIT, 21)
+    # [클릭 센서 정밀도 수정] 21개 -> 101개로 대폭 증가 (0.1 단위 정밀도)
+    sensor_pts = np.linspace(-LIMIT, LIMIT, 101)
     sx, sy = np.meshgrid(sensor_pts, sensor_pts)
     fig.add_trace(go.Scatter(x=sx.flatten(), y=sy.flatten(), mode='markers',
-                             marker=dict(color='rgba(0,0,0,0)', size=10), showlegend=False))
+                             marker=dict(color='rgba(0,0,0,0)', size=6), showlegend=False))
 
-    # [2] 출발/도착 지점
+    # [2] 출발/도착
     fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers',
                              marker=dict(color='#27AE60', size=15), name="Start",
                              unselected=dict(marker=dict(opacity=1))))
@@ -133,28 +120,24 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
                              marker=dict(color='#C0392B', size=22, symbol='star'), name="Goal",
                              unselected=dict(marker=dict(opacity=1))))
 
-    # [3] 배치된 와류들 (양수/음수 색상 구분)
+    # [3] 배치된 와류들
     for vx, vy, vg in st.session_state.vortices:
-        # 양수는 주황색, 음수는 보라색으로 구분
         v_color = '#E67E22' if vg > 0 else '#8E44AD'
         fig.add_trace(go.Scatter(x=[vx], y=[vy], mode='markers',
                                  marker=dict(color=v_color, size=14, line=dict(width=2, color='white')),
                                  unselected=dict(marker=dict(opacity=1))))
 
-    # [4] 클릭 위치 미리보기
     if st.session_state.temp_pos:
         fig.add_trace(go.Scatter(x=[st.session_state.temp_pos[0]], y=[st.session_state.temp_pos[1]],
                                  mode='markers', marker=dict(color='gray', size=15, symbol='x'),
                                  unselected=dict(marker=dict(opacity=1))))
 
-    # [5] 경로 및 플레이어
     if path_history is not None:
         ph = np.array(path_history)
         fig.add_trace(go.Scatter(x=ph[:,0], y=ph[:,1], mode='lines',
                                  line=dict(color='#F1C40F', width=3, dash='dot')))
 
     if current_pos is not None:
-        # 충돌 시 '펑' 효과 시각화
         if crash:
             fig.add_trace(go.Scatter(x=[current_pos[0]], y=[current_pos[1]], mode='markers+text',
                                      marker=dict(color='orange', size=50, symbol='hexagram', 
@@ -175,39 +158,31 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
     )
     return fig
 
-# --- 5. 게임 루프 ---
+# --- 5. 루프 ---
 plot_placeholder = st.empty()
 
 if st.session_state.playing:
     curr_pos = P_START.copy()
     path_history = [curr_pos.copy()]
     status = None
-    
     for i in range(300):
         u, v = get_velocity_at(curr_pos[0], curr_pos[1], st.session_state.vortices)
         curr_pos += np.array([u, v]) * 0.1
         path_history.append(curr_pos.copy())
-        
         status = check_collision(curr_pos)
-        
-        # 화면 업데이트
         fig = draw_stage(current_pos=curr_pos, path_history=path_history, crash=(status is not None))
         plot_placeholder.plotly_chart(fig, use_container_width=False, key=f"play_{i}")
-        
         if status: break
         if np.linalg.norm(curr_pos - Q_TARGET) < TARGET_RADIUS:
             status = "SUCCESS"
             break
         time.sleep(0.01)
-    
     if status == "SUCCESS":
-        st.balloons()
-        st.success("🎉 스테이지 클리어!")
+        st.balloons(); st.success("🎉 스테이지 클리어!")
     elif status == "OBSTACLE":
-        st.error("💥 장애물과 충돌했습니다! (POW!)")
+        st.error("💥 장애물 충돌! (POW!)")
     elif status == "WALL":
-        st.warning("🌊 필드 밖으로 휩쓸려갔습니다!")
-    
+        st.warning("🌊 장외 이탈!")
     st.session_state.playing = False
 else:
     fig = draw_stage()
