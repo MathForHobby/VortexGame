@@ -82,13 +82,14 @@ with st.sidebar:
 # --- 4. 렌더링 함수 ---
 def draw_stage(current_pos=None, path_history=None, crash=False):
     fig = go.Figure()
-    bg_color = "#E0F2F7"
+    bg_color = "#E0F2F7" # 연파랑 배경
     
-    # [1] 벡터 필드
+    # [1] 벡터 필드 (흐름 선 시각화 수정)
     if st.session_state.vortices:
         arrows_x, arrows_y = [], []
         grid_pts = np.linspace(-LIMIT, LIMIT, 16)
-        scale = 0.2
+        scale = 0.22  # 화살표 길이를 살짝 키움
+        
         for gx in grid_pts:
             for gy in grid_pts:
                 u, v = get_velocity_at(gx, gy, st.session_state.vortices)
@@ -96,8 +97,10 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
                 if speed > 0.05:
                     arrows_x.extend([gx, gx + (u/speed)*scale, None])
                     arrows_y.extend([gy, gy + (v/speed)*scale, None])
+        
+        # 색상을 진한 네이비 블루로 바꾸고 두께(width)를 1.8로 강화
         fig.add_trace(go.Scatter(x=arrows_x, y=arrows_y, mode='lines',
-                                 line=dict(color='rgba(0, 100, 200, 0.15)', width=1),
+                                 line=dict(color='rgba(0, 50, 120, 0.45)', width=1.8),
                                  hoverinfo='none', showlegend=False))
 
     if st.session_state.current_stage == 2:
@@ -106,13 +109,13 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
                       x1=OBSTACLE_RECT['x'][1], y1=OBSTACLE_RECT['y'][1],
                       line=dict(color="RoyalBlue"), fillcolor="LightSlateGray", opacity=0.8)
 
-    # [클릭 센서 정밀도 수정] 21개 -> 101개로 대폭 증가 (0.1 단위 정밀도)
+    # [클릭 센서] 정밀도 101 유지
     sensor_pts = np.linspace(-LIMIT, LIMIT, 101)
     sx, sy = np.meshgrid(sensor_pts, sensor_pts)
     fig.add_trace(go.Scatter(x=sx.flatten(), y=sy.flatten(), mode='markers',
                              marker=dict(color='rgba(0,0,0,0)', size=6), showlegend=False))
 
-    # [2] 출발/도착
+    # [2] 출발/도착 지점
     fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers',
                              marker=dict(color='#27AE60', size=15), name="Start",
                              unselected=dict(marker=dict(opacity=1))))
@@ -158,7 +161,7 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
     )
     return fig
 
-# --- 5. 루프 ---
+# --- 5. 게임 루프 ---
 plot_placeholder = st.empty()
 
 if st.session_state.playing:
