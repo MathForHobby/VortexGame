@@ -15,7 +15,6 @@ if 'playing' not in st.session_state:
     st.session_state.playing = False
 if 'current_stage' not in st.session_state:
     st.session_state.current_stage = 1
-# 결과 메시지 보존을 위한 상태 추가
 if 'game_result' not in st.session_state:
     st.session_state.game_result = None
 
@@ -62,12 +61,15 @@ with st.sidebar:
     
     if st.session_state.temp_pos and len(st.session_state.vortices) < max_v:
         st.markdown(f"#### 📍 위치: `{st.session_state.temp_pos[0]:.1f}, {st.session_state.temp_pos[1]:.1f}`")
-        v_gamma = st.slider("강도 (Γ)", -30.0, 30.0, 10.0)
+        
+        # [수정 사항] 범위 -10.0 ~ 10.0, 간격 0.1로 조정
+        v_gamma = st.slider("강도 (Γ)", -10.0, 10.0, 5.0, step=0.1)
+        
         col1, col2 = st.columns(2)
         if col1.button("✅ 배치"):
             st.session_state.vortices.append([st.session_state.temp_pos[0], st.session_state.temp_pos[1], v_gamma])
             st.session_state.temp_pos = None
-            st.session_state.game_result = None # 설계 변경 시 메시지 삭제
+            st.session_state.game_result = None
             st.rerun()
         if col2.button("❌ 취소"):
             st.session_state.temp_pos = None
@@ -77,7 +79,7 @@ with st.sidebar:
     if not st.session_state.playing:
         if st.button("🚀 PLAY", use_container_width=True, type="primary"):
             st.session_state.playing = True
-            st.session_state.game_result = None # 새로 시작 시 메시지 삭제
+            st.session_state.game_result = None
     
     if st.button("🔄 리셋", use_container_width=True):
         st.session_state.vortices = []
@@ -161,7 +163,7 @@ def draw_stage(current_pos=None, path_history=None, crash=False):
     )
     return fig
 
-# --- 5. 결과 메시지 표시 영역 ---
+# --- 5. 결과 메시지 표시 ---
 if st.session_state.game_result:
     res_type, res_text = st.session_state.game_result
     if res_type == "success": st.success(res_text)
@@ -178,7 +180,7 @@ if st.session_state.playing:
     
     for i in range(300):
         u, v = get_velocity_at(curr_pos[0], curr_pos[1], st.session_state.vortices)
-        curr_pos += np.array([u, v]) * 0.3 # 3배 속도 유지
+        curr_pos += np.array([u, v]) * 0.3 
         path_history.append(curr_pos.copy())
         
         status = check_collision(curr_pos)
@@ -191,21 +193,20 @@ if st.session_state.playing:
             break
         time.sleep(0.01)
     
-    # 결과 메시지 저장
     if status == "SUCCESS":
-        st.session_state.game_result = ("success", "🎉 축하합니다! 도착 지점에 성공적으로 도달했습니다!")
+        st.session_state.game_result = ("success", "🎉 축하합니다! 도착 지점에 도달했습니다!")
         st.balloons()
     elif status == "OBSTACLE":
-        st.session_state.game_result = ("error", "💥 장애물과 충돌했습니다! (POW!)")
+        st.session_state.game_result = ("error", "💥 장애물 충돌! (POW!)")
     elif status == "WALL":
         st.session_state.game_result = ("warning", "🌊 필드 밖으로 휩쓸려갔습니다!")
     
     st.session_state.playing = False
-    st.rerun() # 메시지 표시를 위해 다시 실행
+    st.rerun() 
 else:
     fig = draw_stage()
     event_data = plot_placeholder.plotly_chart(fig, on_select="rerun", key="design_chart")
     if event_data and "selection" in event_data and event_data["selection"]["points"]:
         st.session_state.temp_pos = (event_data["selection"]["points"][0]['x'], event_data["selection"]["points"][0]['y'])
-        st.session_state.game_result = None # 다시 설계 시작하면 메시지 삭제
+        st.session_state.game_result = None
         st.rerun()
