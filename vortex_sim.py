@@ -63,12 +63,32 @@ with st.sidebar:
         st.session_state.playing = False
         st.rerun()
 
-# --- 4. 렌더링 함수 (버그 수정됨) ---
+# --- 4. 렌더링 함수 ---
 def draw_stage(current_pos=None, path_history=None):
     fig = go.Figure()
 
-    # 공통 설정: 선택 시 다른 요소가 사라지지 않게 강제 설정
-    no_hide = dict(marker=dict(opacity=1), line=dict(opacity=1))
+    # [1] 벡터 필드 (Flow Arrows) - Scatter 선으로 구현하여 버그 해결
+    if st.session_state.vortices:
+        arrows_x, arrows_y = [], []
+        grid_pts = np.linspace(-LIMIT, LIMIT, 16)
+        scale = 0.2  # 화살표 길이 조절
+        
+        for gx in grid_pts:
+            for gy in grid_pts:
+                u, v = get_velocity_at(gx, gy, st.session_state.vortices)
+                speed = np.sqrt(u**2 + v**2)
+                if speed > 0.05:
+                    # 선의 시작점과 끝점 사이에 None을 넣어 개별 선으로 분리
+                    arrows_x.extend([gx, gx + (u/speed)*scale, None])
+                    arrows_y.extend([gy, gy + (v/speed)*scale, None])
+        
+        fig.add_trace(go.Scatter(
+            x=arrows_x, y=arrows_y,
+            mode='lines',
+            line=dict(color='rgba(200, 200, 255, 0.4)', width=1),
+            hoverinfo='none', showlegend=False,
+            unselected=dict(line=dict(opacity=0.4))
+        ))
 
     # [배경 센서]
     sensor_pts = np.linspace(-LIMIT, LIMIT, 21)
@@ -77,26 +97,10 @@ def draw_stage(current_pos=None, path_history=None):
         x=sx.flatten(), y=sy.flatten(), mode='markers',
         marker=dict(color='rgba(0,0,0,0)', size=10),
         showlegend=False, hoverinfo='none',
-        unselected=dict(marker=dict(opacity=0)) # 센서는 평소에 안 보임
+        unselected=dict(marker=dict(opacity=0))
     ))
 
-    # [1] 벡터 필드 (Flow)
-    if st.session_state.vortices:
-        grid_pts = np.linspace(-LIMIT, LIMIT, 15)
-        for gx in grid_pts:
-            for gy in grid_pts:
-                u, v = get_velocity_at(gx, gy, st.session_state.vortices)
-                speed = np.sqrt(u**2 + v**2)
-                if speed > 0.1:
-                    scale = 0.25
-                    fig.add_annotation(
-                        x=gx + (u/speed)*scale, y=gy + (v/speed)*scale,
-                        ax=gx, ay=gy, xref="x", yref="y", axref="x", ayref="y",
-                        showarrow=True, arrowhead=1, arrowsize=1, arrowwidth=0.8,
-                        arrowcolor="rgba(255, 255, 255, 0.15)"
-                    )
-
-    # [2] 출발/도착 지점 (unselected 설정 추가로 사라짐 방지)
+    # [2] 출발/도착 지점
     fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers',
                              marker=dict(color='#2ECC71', size=15), name="Start",
                              unselected=dict(marker=dict(opacity=1))))
@@ -116,13 +120,13 @@ def draw_stage(current_pos=None, path_history=None):
         tx, ty = st.session_state.temp_pos
         fig.add_trace(go.Scatter(x=[tx], y=[ty], mode='markers',
                                  marker=dict(color='white', size=15, symbol='x-thin', line=dict(width=2)),
-                                 name="Click Point"))
+                                 name="Click Point", unselected=dict(marker=dict(opacity=1))))
 
     # [5] 경로 및 플레이어
     if path_history is not None:
         ph = np.array(path_history)
         fig.add_trace(go.Scatter(x=ph[:,0], y=ph[:,1], mode='lines',
-                                 line=dict(color='yellow', width=2, dash='dot'),
+                                 line=dict(color='#F1C40F', width=3, dash='dot'),
                                  unselected=dict(line=dict(opacity=1))))
 
     if current_pos is not None:
