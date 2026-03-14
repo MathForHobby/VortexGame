@@ -1,103 +1,86 @@
 import streamlit as st
 import numpy as np
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
-# --- 1. 기본 설정 ---
-st.set_page_config(page_title="THE VORTEX: Designer", layout="wide")
-st.title("🌀 THE VORTEX: Path Designer")
-st.markdown("와류를 배치하여 주인공(●)을 도착지점(★)으로 인도하세요!")
+# --- 1. 초기화 ---
+st.set_page_config(page_title="THE VORTEX: Click & Play", layout="wide")
+st.title("🌀 THE VORTEX: Designer Mode")
 
-# --- 2. 게임 데이터 초기화 ---
 if 'vortices' not in st.session_state:
-    st.session_state.vortices = []  # [[x, y, gamma], ...]
+    st.session_state.vortices = []
+if 'temp_pos' not in st.session_state:
+    st.session_state.temp_pos = None
 
-# --- 3. 사이드바: 조작 및 설정 ---
-with st.sidebar:
-    st.header("🛠️ Level Editor")
-    
-    # 출발(P) 및 도착(Q) 설정
-    p_start = np.array([-4.0, 0.0])
-    q_target = np.array([4.0, 0.0])
-    target_radius = 0.3
-    
-    st.subheader("Add Vortex")
-    v_x = st.number_input("Vortex X", -5.0, 5.0, 0.0)
-    v_y = st.number_input("Vortex Y", -5.0, 5.0, 0.0)
-    v_g = st.slider("Strength (Γ)", -20.0, 20.0, 5.0)
-    
-    if st.button("Add Vortex"):
-        st.session_state.vortices.append([v_x, v_y, v_g])
-    
-    if st.button("Clear All"):
-        st.session_state.vortices = []
-        st.rerun()
+# 고정된 P(출발)와 Q(도착)
+P_START = np.array([-4.0, 0.0])
+Q_TARGET = np.array([4.0, 0.0])
 
-# --- 4. 물리 연산 엔진 (고정 와류 모델) ---
-def compute_trajectory(p_start, vortices, dt=0.05, max_steps=1000):
-    path = [p_start.copy()]
-    curr_p = p_start.copy()
-    
-    for _ in range(max_steps):
+# --- 2. 물리 연산 (Trajectory) ---
+def get_path(vortices):
+    path = [P_START]
+    curr = P_START.copy()
+    dt = 0.05
+    for _ in range(500):
         u, v = 0.0, 0.0
-        # 중첩의 원리: 각 고정 와류에 의한 속도 합산
         for vx, vy, vg in vortices:
-            dx = curr_p[0] - vx
-            dy = curr_p[1] - vy
-            r2 = dx**2 + dy**2 + 0.01 # Singularity 절단
-            
+            dx, dy = curr[0] - vx, curr[1] - vy
+            r2 = dx**2 + dy**2 + 0.01
             u += -(vg / (2 * np.pi)) * (dy / r2)
             v += (vg / (2 * np.pi)) * (dx / r2)
-        
-        curr_p += np.array([u, v]) * dt
-        path.append(curr_p.copy())
-        
-        # 경계를 벗어나거나 목표 도달 시 중단
-        if np.linalg.norm(curr_p - q_target) < target_radius:
-            return np.array(path), True
-        if np.abs(curr_p[0]) > 6 or np.abs(curr_p[1]) > 6:
+        curr += np.array([u, v]) * dt
+        path.append(curr.copy())
+        if np.linalg.norm(curr - Q_TARGET) < 0.3 or np.abs(curr).max() > 6:
             break
-            
-    return np.array(path), False
+    return np.array(path)
 
-# --- 5. 시각화 및 렌더링 ---
-path, win = compute_trajectory(p_start, st.session_state.vortices)
+# --- 3. Plotly 인터랙티브 맵 ---
+fig = go.Figure()
 
-fig, ax = plt.subplots(figsize=(8, 8), facecolor='#111111')
-ax.set_facecolor('#111111')
+# 경로 그리기
+path_data = get_path(st.session_state.vortices)
+fig.add_trace(go.Scatter(x=path_data[:,0], y=path_data[:,1], mode='lines', line=dict(color='cyan', width=2), name="Path"))
 
-# 1. 출발지(P)와 도착지(Q) 그리기
-ax.plot(p_start[0], p_start[1], 'go', markersize=10, label="Start (P)")
-ax.plot(q_target[0], q_target[1], 'r*', markersize=15, label="Goal (Q)")
-circle = plt.Circle(q_target, target_radius, color='red', fill=False, linestyle='--')
-ax.add_patch(circle)
+# P와 Q 표시
+fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers', marker=dict(color='green', size=12), name="Start"))
+fig.add_trace(go.Scatter(x=[Q_TARGET[0]], y=[Q_TARGET[1]], mode='markers', marker=dict(color='red', size=15, symbol='star'), name="Goal"))
 
-# 2. 와류 시각화
+# 배치된 와류들
 for vx, vy, vg in st.session_state.vortices:
-    color = '#FF4B4B' if vg > 0 else '#1C83E1'
-    ax.plot(vx, vy, 'o', color=color, markersize=8)
-    # 방향 표시용 화살표 (단순화)
-    ax.annotate("", xy=(vx, vy+0.2), xytext=(vx, vy-0.2),
-                arrowprops=dict(arrowstyle="->", color=color, lw=2))
+    color = 'red' if vg > 0 else 'blue'
+    fig.add_trace(go.Scatter(x=[vx], y=[vy], mode='markers', marker=dict(color=color, size=10), showlegend=False))
 
-# 3. 경로(Trajectory) 그리기
-if len(path) > 1:
-    ax.plot(path[:, 0], path[:, 1], color='cyan', lw=2, alpha=0.8)
-    # 화살표로 진행 방향 표시
-    mid = len(path) // 2
-    ax.annotate("", xy=path[mid+1], xytext=path[mid],
-                arrowprops=dict(arrowstyle="->", color='cyan', lw=2))
+# 차트 설정
+fig.update_layout(
+    width=700, height=700,
+    xaxis=dict(range=[-6, 6], fixedrange=True),
+    yaxis=dict(range=[-6, 6], fixedrange=True),
+    template="plotly_dark",
+    clickmode='event+select'
+)
 
-# 4. 그래프 디테일
-ax.set_xlim(-6, 6)
-ax.set_ylim(-6, 6)
-ax.set_aspect('equal')
-ax.grid(color='#333333', linestyle='--', alpha=0.5)
-ax.legend()
+# 클릭 이벤트 감지 (Streamlit 1.35+ 기준 on_select 기능 활용)
+event_data = st.plotly_chart(fig, on_select="rerun", key="vortex_chart")
 
-st.pyplot(fig)
+# 클릭 시 임시 좌표 저장
+if event_data and "selection" in event_data and event_data["selection"]["points"]:
+    point = event_data["selection"]["points"][0]
+    st.session_state.temp_pos = (point['x'], point['y'])
 
-# 결과 메시지
-if win:
-    st.success("🎉 목표 지점에 도달했습니다! 성공!")
-else:
-    st.warning("경로를 설계하여 Q(별표)까지 도달시키세요.")
+# --- 4. 동적 슬라이더 UI (클릭했을 때만 나타남) ---
+if st.session_state.temp_pos:
+    st.sidebar.success(f"선택된 좌표: ({st.session_state.temp_pos[0]:.2f}, {st.session_state.temp_pos[1]:.2f})")
+    v_gamma = st.sidebar.slider("와류 강도 결정 (Γ)", -20.0, 20.0, 5.0, key="gamma_slider")
+    
+    col1, col2 = st.sidebar.columns(2)
+    if col1.button("와류 배치 확정"):
+        st.session_state.vortices.append([st.session_state.temp_pos[0], st.session_state.temp_pos[1], v_gamma])
+        st.session_state.temp_pos = None
+        st.rerun()
+    if col2.button("취소"):
+        st.session_state.temp_pos = None
+        st.rerun()
+
+if st.sidebar.button("전체 초기화"):
+    st.session_state.vortices = []
+    st.session_state.temp_pos = None
+    st.rerun()
