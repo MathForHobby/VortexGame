@@ -3,10 +3,12 @@ import numpy as np
 import plotly.graph_objects as go
 import time
 
-# --- 1. 초기화 및 설정 ---
-st.set_page_config(page_title="THE VORTEX: Play Mode", layout="wide")
+# --- 1. 초기화 및 상반기 설정 ---
+st.set_page_config(page_title="THE VORTEX", layout="wide")
 st.title("🌀 THE VORTEX: 설계와 실행")
+st.markdown("맵을 클릭하여 와류를 배치하고, **PLAY**를 눌러 주인공을 Goal로 인도하세요.")
 
+# 세션 상태 초기화
 if 'vortices' not in st.session_state:
     st.session_state.vortices = []
 if 'temp_pos' not in st.session_state:
@@ -14,130 +16,168 @@ if 'temp_pos' not in st.session_state:
 if 'playing' not in st.session_state:
     st.session_state.playing = False
 
+# 게임 상수
 P_START = np.array([-4.0, 0.0])
 Q_TARGET = np.array([4.0, 0.0])
+TARGET_RADIUS = 0.3
+LIMIT = 5.0
 
-# --- 2. 사이드바 조작 ---
+# --- 2. 물리 엔진 함수 ---
+def get_velocity_at(x, y, vortices):
+    """특정 좌표 (x, y)에서의 합성 유속 u, v를 계산"""
+    u, v = 0.0, 0.0
+    for vx, vy, vg in vortices:
+        dx, dy = x - vx, y - vy
+        r2 = dx**2 + dy**2 + 0.1  # Singularity 방지
+        u += -(vg / (2 * np.pi)) * (dy / r2)
+        v += (vg / (2 * np.pi)) * (dx / r2)
+    return u, v
+
+# --- 3. 사이드바 UI 컨트롤 ---
 with st.sidebar:
-    st.header("🎮 Game Control")
+    st.header("🎮 조작 패널")
+    
     # (1) 와류 개수 제한 설정
-    max_vortices = st.number_input("최대 배치 가능 와류 수", 1, 10, 3)
-    current_count = len(st.session_state.vortices)
-    st.write(f"현재 배치: {current_count} / {max_vortices}")
-
-    if st.session_state.temp_pos and current_count < max_vortices:
-        st.info(f"선택 좌표: ({st.session_state.temp_pos[0]:.1f}, {st.session_state.temp_pos[1]:.1f})")
-        v_gamma = st.slider("와류 강도(Γ)", -20.0, 20.0, 5.0)
-        if st.button("와류 배치 확정"):
+    max_v = st.number_input("최대 와류 개수", 1, 20, 5)
+    st.write(f"현재 배치된 와류: {len(st.session_state.vortices)} / {max_v}")
+    
+    # 와류 배치 UI
+    if st.session_state.temp_pos and len(st.session_state.vortices) < max_v:
+        st.info(f"선택 지점: ({st.session_state.temp_pos[0]:.1f}, {st.session_state.temp_pos[1]:.1f})")
+        v_gamma = st.slider("와류 강도 (Γ)", -30.0, 30.0, 10.0)
+        if st.button("✅ 배치 확정"):
             st.session_state.vortices.append([st.session_state.temp_pos[0], st.session_state.temp_pos[1], v_gamma])
             st.session_state.temp_pos = None
             st.rerun()
+        if st.button("❌ 취소"):
+            st.session_state.temp_pos = None
+            st.rerun()
+            
+    st.divider()
     
-    if st.button("전체 초기화"):
+    # (2) 게임 실행 버튼
+    if not st.session_state.playing:
+        if st.button("🚀 PLAY: 흐름 시작", use_container_width=True, type="primary"):
+            if not st.session_state.vortices:
+                st.warning("와류를 먼저 배치하세요!")
+            else:
+                st.session_state.playing = True
+    
+    if st.button("🔄 리셋 (모든 와류 삭제)", use_container_width=True):
         st.session_state.vortices = []
         st.session_state.temp_pos = None
         st.session_state.playing = False
         st.rerun()
 
-    st.divider()
-    # (2) 실행 버튼
-    if st.button("🚀 PLAY: Flow 시작!", use_container_width=True):
-        st.session_state.playing = True
-
-# --- 3. 물리 및 벡터 필드 연산 ---
-def get_velocity_at(x, y, vortices):
-    u, v = 0.0, 0.0
-    for vx, vy, vg in vortices:
-        dx, dy = x - vx, y - vy
-        r2 = dx**2 + dy**2 + 0.1 # Singularity 방지
-        u += -(vg / (2 * np.pi)) * (dy / r2)
-        v += (vg / (2 * np.pi)) * (dx / r2)
-    return u, v
-
-# (3) 필드 전체 화살표(Vector Field) 생성
-grid_pts = np.linspace(-5, 5, 20)
-X, Y = np.meshgrid(grid_pts, grid_pts)
-U = np.zeros_like(X)
-V = np.zeros_like(Y)
-
-for i in range(len(grid_pts)):
-    for j in range(len(grid_pts)):
-        u, v = get_velocity_at(X[i,j], Y[i,j], st.session_state.vortices)
-        speed = np.sqrt(u**2 + v**2)
-        if speed > 0: # 화살표 정규화 (크기 고정, 방향만 표시)
-            U[i,j] = u / (speed + 0.1)
-            V[i,j] = v / (speed + 0.1)
-
-# --- 4. 렌더링 함수 ---
-def draw_stage(current_pos=None):
+# --- 4. 렌더링 함수 (Pure 2D Plotly) ---
+def draw_stage(current_pos=None, path_history=None):
     fig = go.Figure()
 
-    # 벡터 필드 그리기 (화살표)
-    if st.session_state.vortices:
-        fig.add_trace(go.Cone(
-            x=X.flatten(), y=Y.flatten(), z=np.zeros_like(X.flatten()),
-            u=U.flatten(), v=V.flatten(), w=np.zeros_like(X.flatten()),
-            sizemode="absolute", sizeref=0.3, showscale=False, 
-            colorscale=[[0, 'gray'], [1, 'gray']], opacity=0.3, name="Flow"
-        ))
-
-    # 클릭 센서용 그리드
-    sensor_pts = np.linspace(-5, 5, 25)
+    # [배경] 투명 클릭 센서 (배경 어디든 클릭 가능하게 함)
+    sensor_pts = np.linspace(-LIMIT, LIMIT, 25)
     sx, sy = np.meshgrid(sensor_pts, sensor_pts)
-    fig.add_trace(go.Scatter(x=sx.flatten(), y=sy.flatten(), mode='markers', 
-                             marker=dict(color='rgba(0,0,0,0)', size=5), showlegend=False))
+    fig.add_trace(go.Scatter(
+        x=sx.flatten(), y=sy.flatten(),
+        mode='markers',
+        marker=dict(color='rgba(0,0,0,0)', size=10),
+        showlegend=False,
+        hoverinfo='none'
+    ))
 
-    # P(출발)와 Q(도착)
-    fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers', marker=dict(color='green', size=15), name="Start"))
-    fig.add_trace(go.Scatter(x=[Q_TARGET[0]], y=[Q_TARGET[1]], mode='markers', marker=dict(color='red', size=20, symbol='star'), name="Goal"))
+    # [1] 벡터 필드 (Flow Arrows) 시각화
+    if st.session_state.vortices:
+        grid_pts = np.linspace(-LIMIT, LIMIT, 16)
+        for gx in grid_pts:
+            for gy in grid_pts:
+                u, v = get_velocity_at(gx, gy, st.session_state.vortices)
+                speed = np.sqrt(u**2 + v**2)
+                if speed > 0.1:
+                    scale = 0.25
+                    # 화살표 그리기 (Annotation 사용)
+                    fig.add_annotation(
+                        x=gx + (u/speed)*scale, y=gy + (v/speed)*scale,
+                        ax=gx, ay=gy, xref="x", yref="y", axref="x", ayref="y",
+                        showarrow=True, arrowhead=1, arrowsize=1, arrowwidth=0.8,
+                        arrowcolor="rgba(255, 255, 255, 0.2)"
+                    )
 
-    # 와류들
+    # [2] 출발(P)과 도착(Q) 마커
+    fig.add_trace(go.Scatter(x=[P_START[0]], y=[P_START[1]], mode='markers',
+                             marker=dict(color='#2ECC71', size=15), name="Start"))
+    fig.add_trace(go.Scatter(x=[Q_TARGET[0]], y=[Q_TARGET[1]], mode='markers',
+                             marker=dict(color='#E74C3C', size=20, symbol='star'), name="Goal"))
+
+    # [3] 배치된 와류들
     for vx, vy, vg in st.session_state.vortices:
-        fig.add_trace(go.Scatter(x=[vx], y=[vy], mode='markers', marker=dict(color='orange', size=12, line=dict(width=2, color='white')), showlegend=False))
+        v_color = '#F39C12' if vg > 0 else '#9B59B6'
+        fig.add_trace(go.Scatter(x=[vx], y=[vy], mode='markers',
+                                 marker=dict(color=v_color, size=12, line=dict(width=2, color='white')),
+                                 hovertext=f"Strength: {vg}"))
 
-    # (2) 플레이어 아이콘 움직임
+    # [4] 경로 이력 (Path History)
+    if path_history is not None and len(path_history) > 1:
+        ph = np.array(path_history)
+        fig.add_trace(go.Scatter(x=ph[:,0], y=ph[:,1], mode='lines',
+                                 line=dict(color='yellow', width=2, dash='dot')))
+
+    # [5] 플레이어 아이콘 (현재 위치)
     if current_pos is not None:
-        fig.add_trace(go.Scatter(x=[current_pos[0]], y=[current_pos[1]], mode='markers', 
-                                 marker=dict(color='yellow', size=18, symbol='circle', line=dict(width=3, color='black')), name="Player"))
+        fig.add_trace(go.Scatter(x=[current_pos[0]], y=[current_pos[1]], mode='markers',
+                                 marker=dict(color='#F1C40F', size=18, symbol='circle',
+                                             line=dict(width=3, color='black')), name="Player"))
 
-    fig.update_layout(width=800, height=800, template="plotly_dark", 
-                      xaxis=dict(range=[-5, 5], fixedrange=True), yaxis=dict(range=[-5, 5], fixedrange=True))
+    # 레이아웃 최적화 (2D 고정)
+    fig.update_layout(
+        width=800, height=800,
+        template="plotly_dark",
+        xaxis=dict(range=[-LIMIT-0.5, LIMIT+0.5], fixedrange=True, zeroline=False, showgrid=False),
+        yaxis=dict(range=[-LIMIT-0.5, LIMIT+0.5], fixedrange=True, zeroline=False, showgrid=False),
+        margin=dict(l=20, r=20, t=20, b=20),
+        clickmode='event+select',
+        showlegend=False
+    )
     return fig
 
-# --- 5. 게임 실행 루프 ---
+# --- 5. 메인 로직 및 실행 루프 ---
 plot_placeholder = st.empty()
 
 if st.session_state.playing:
+    # 실행 모드: 입자가 움직임
     curr_pos = P_START.copy()
     path_history = [curr_pos.copy()]
     
-    for _ in range(200): # 최대 200프레임 애니메이션
+    success = False
+    for i in range(250): # 최대 프레임 수
         u, v = get_velocity_at(curr_pos[0], curr_pos[1], st.session_state.vortices)
-        curr_pos += np.array([u, v]) * 0.1
+        curr_pos += np.array([u, v]) * 0.1  # 속도 조절(dt)
         path_history.append(curr_pos.copy())
         
         # 화면 업데이트
-        fig = draw_stage(current_pos=curr_pos)
-        # 경로선 추가
-        h = np.array(path_history)
-        fig.add_trace(go.Scatter(x=h[:,0], y=h[:,1], mode='lines', line=dict(color='yellow', width=1, dash='dot')))
-        plot_placeholder.plotly_chart(fig, use_container_width=False, key=f"play_{_}")
+        fig = draw_stage(current_pos=curr_pos, path_history=path_history)
+        plot_placeholder.plotly_chart(fig, use_container_width=False, key=f"play_frame_{i}")
         
-        # 도착 판정
-        if np.linalg.norm(curr_pos - Q_TARGET) < 0.3:
-            st.balloons()
-            st.success("도착 성공!")
-            st.session_state.playing = False
+        # 승리/패배 판정
+        if np.linalg.norm(curr_pos - Q_TARGET) < TARGET_RADIUS:
+            success = True
             break
-        if np.abs(curr_pos).max() > 5:
-            st.error("장외 이탈! 다시 설계하세요.")
-            st.session_state.playing = False
+        if np.abs(curr_pos).max() > LIMIT + 0.5:
+            st.error("장외 이탈! 와류 배치를 다시 고민해 보세요.")
             break
-        time.sleep(0.01)
+        time.sleep(0.01) # 애니메이션 속도
+    
+    if success:
+        st.balloons()
+        st.success("🎉 축하합니다! 도착 지점에 성공적으로 도달했습니다!")
+    
+    st.session_state.playing = False # 실행 종료 후 대기 모드로 전환
+
 else:
-    # 대기 상태 (설계 모드)
+    # 설계 모드: 클릭 대기
     fig = draw_stage()
-    event_data = plot_placeholder.plotly_chart(fig, on_select="rerun", key="setup_chart")
+    event_data = plot_placeholder.plotly_chart(fig, on_select="rerun", key="design_chart")
+    
     if event_data and "selection" in event_data and event_data["selection"]["points"]:
-        st.session_state.temp_pos = (event_data["selection"]["points"][0]['x'], event_data["selection"]["points"][0]['y'])
+        # 클릭된 좌표 저장
+        pt = event_data["selection"]["points"][0]
+        st.session_state.temp_pos = (pt['x'], pt['y'])
         st.rerun()
